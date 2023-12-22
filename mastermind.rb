@@ -1,10 +1,10 @@
-# Class representing the Code Maker who generates the secret code
+# Class representing the Code Maker who sets the secret code
 class Codemaker
   attr_reader :code
 
-  # Initialize with an optional test code for testing purposes
-  def initialize(test_code = nil)
-    @code = test_code || create_code
+  # Initialize with an optional secret code for a human player to play Code Maker
+  def initialize(code = nil)
+    @code = code || create_code
   end
 
   # Method to create a random 4-digit code
@@ -13,7 +13,7 @@ class Codemaker
   end
 end
 
-# Class representing the Codebreaker (player)
+# Class representing the Code Breaker who tries to guess the secret code
 class Codebreaker
   attr_reader :name
 
@@ -29,7 +29,7 @@ class Board
   def initialize
     @board = Array.new(12) { Array.new(4, "-") }
     @guess_feedback = Array.new(12) { Array.new(4, "-") }
-    @show_code = false # Option to show/hide the secret code
+    @show_code = false # Option to show/hid the secret code for testing purposes. Set @show_code to true to test the program.
   end
 
   # Method to display the current state of the game board
@@ -79,20 +79,60 @@ end
 
 # Class representing the game logic
 class Game
-  attr_reader :player_name, :code
+  attr_reader :player_name, :code, :player_guess, :feedback_copy
 
-  def initialize(player_name, codemaker, board)
+  def initialize(player_name, codemaker, board, codebreaker = nil)
     @player_name = player_name
     @code = codemaker.code
     @board = board
-    @guess_feedback
+    @feedback_copy = nil
     @turn_number = 1
+    @codebreaker = codebreaker
   end
 
-  # Main game loop method
+  # The main method loop for game play
   def play
+    if @codebreaker.is_a?(ComputerCodeBreaker)
+      computer_play
+    else
+      human_play
+    end
+  end
 
-    # Main game loop for 12 turns or until the game is won
+  # Logic for when the computer is playing as the Code Breaker
+  def computer_play
+    loop do
+      puts "\n|--------------------------------------------------"
+      puts "\n|                     TURN: #{@turn_number}"
+      @board.display(self)
+      @player_guess = @codebreaker.make_guess(@feedback_copy)
+      @codebreaker.last_guess = @player_guess.join
+      puts "| The Code Breaker Computer's Turn #{@turn_number} guess is : #{@player_guess[0]} #{@player_guess[1]} #{@player_guess[2]} #{@player_guess[3]}"
+      update_guess_in_board
+      check_guess
+      update_guess_feedback_in_board
+      if win?
+        @board.reveal_code
+        puts "\n|--------------------------------------------------"
+        puts "\n| Game over! You've lost the game! Code Breaker Computer has correctly guessed the secret code."
+        @board.display(self)
+        break
+      elsif @turn_number == 12
+        @board.reveal_code
+        puts "\n|--------------------------------------------------"
+        puts "\n| Congratulations! You've won. Code Breaker computer couldn't guess the Secret Code correctly."
+        @board.display(self)
+        break
+      end
+      puts "\n| Press enter to continue to the next turn..."
+      gets # Waits for the user to press enter or any key
+    @turn_number += 1
+    end
+  end
+
+  # Logic for when a human is playing as Code Breaker
+  def human_play
+    # The main game loop for 12 turns or until the game is won
     loop do
       puts "\n|--------------------------------------------------"
       puts "\n|                     TURN: #{@turn_number}"
@@ -118,10 +158,9 @@ class Game
     end
   end
 
-  # Method to prompt and validate player's guess
+  # Method to prompt and validate human Code Breaker's guess
   def prompt_guess
     valid = false
-
     # Loop to ensure the player enters a valid guess
     while !valid
       print "| #{@player_name}, please enter your guess for Turn #{@turn_number} (4 digits, each 1-6): "
@@ -138,7 +177,7 @@ class Game
     puts "\n"
   end
 
-  # Method to update the board with the player's guess
+  # Method to update the game board with the Code Breaker's guess
   def update_guess_in_board
     @board.board[@turn_number - 1] = @player_guess
   end
@@ -148,10 +187,10 @@ class Game
     exact_match = 0
     value_match = 0
     no_match = 0
-    guess_copy = @player_guess.clone
-    code_copy = @code.clone
+    guess_copy = @player_guess.dup
+    code_copy = @code.dup
 
-    # Check for exact matches
+    # Check for exact position and value matches
     guess_copy.each_with_index do |num, index|
       if num == code_copy[index]
         exact_match += 1
@@ -161,7 +200,7 @@ class Game
     end
 
     # Check for value matches
-    guess_copy.each do |num|
+    guess_copy.compact.each do |num|
       if num && code_copy.include?(num)
         value_match += 1
         code_copy[code_copy.find_index(num)] = nil
@@ -176,28 +215,106 @@ class Game
     @no_match = no_match
   end
 
-  # Method to update the baord with the results of the guess
+  # Method to update the game board with the feedback of the guess
   def update_guess_feedback_in_board
     guess_row = @turn_number - 1
     # Logic to update the guess results with "*", "O", and "X"
     @board.guess_feedback[guess_row] = Array.new(@colour_position_match, "*") +
                                        Array.new(@colour_match, "O") +
                                        Array.new(@no_match, "X")
+
+    @feedback_copy = @board.guess_feedback[guess_row]
   end
 
-  # Method to update the board with the results of the guess
+  # Method to update the game board with the results of the guess
   def win?
     @player_guess == @code
   end
 end
 
+# Class representing the Computer Code Breaker's guessing logic
+class ComputerCodeBreaker
+  attr_accessor :last_guess
+
+  def initialize
+    @last_guess = "1122"
+    # Generate all possible guesses for the secret code
+    @possible_codes = (1111..6666).map(&:to_s).select { |code| code.chars.all? { |digit| digit.between?( '1', '6') } }
+  end
+
+  def make_guess(previous_feedback)
+    if previous_feedback.nil?
+      return ["1", "1", "2", "2"]
+    else
+      process_feedback(previous_feedback)
+      return @possible_codes.sample.chars
+    end
+  end
+
+  private
+
+  def process_feedback(feedback)
+    @possible_codes.reject! do |code|
+      !feedback_matches?(code, feedback)
+    end
+  end
+
+  def feedback_matches?(code, feedback)
+    simulate_feedback(code) == feedback
+  end
+
+  def simulate_feedback(code)
+    return [] if @last_guess.nil? || @last_guess.empty?
+
+    exact_match, value_match = 0, 0
+
+    code_array = code.split("")
+    last_guess_array = @last_guess.chars
+
+    code_array.each_with_index do |digit, index|
+      if digit ==last_guess_array[index]
+        exact_match += 1
+        code_array[index] = nil
+        last_guess_array[index] = nil
+      end
+    end
+
+    code_array.compact.each do |digit|
+      if last_guess_array.include?(digit)
+        value_match += 1
+        last_guess_array[last_guess_array.find_index(digit)] = nil
+      end
+    end
+
+    generated_feedback = Array.new(exact_match, "*") + Array.new(value_match, "O")
+    generated_feedback.fill("X", generated_feedback.length...4)
+    generated_feedback
+  end
+end
+
 # Main script to start the game
-print "\n| Welcome to Mastermind!\n\n| Mastermind is a two player game in which one player, called the Code Maker, sets a 4 digit Secret Code with each digit being a number between 1 and 6, and the other player, called the Code Breaker, attempts to correctly guess the Secret Code set by the Code Maker in 12 turns or less.\n\n| The Code Maker provides limited feedback to the Code Breaker about their guess after each turn of guess.\n\n| The Code Breaker wins the game on correctly guessing the Secret Code in 12 turns or less.\n\n| The Code Maker wins the game if the Code Breaker is unable to correctly guess the Secret Code in 12 turns of guesses or less.\n\n| The computer will be playing the Code Maker in the game. You'll be playing the Code Breaker.\n\n| Please enter your name to start the game: "
+print "\n| Welcome to Mastermind!\n\n| Mastermind is a two player game in which one player, called the Code Maker, sets a 4 digit Secret Code with each digit being a number between 1 and 6, and the other player, called the Code Breaker, attempts to correctly guess the Secret Code set by the Code Maker in 12 turns or less.\n\n| The Code Maker provides limited feedback to the Code Breaker about their guess after each turn of guess.\n\n| The Code Breaker wins the game on correctly guessing the Secret Code in 12 turns or less.\n\n| The Code Maker wins the game if the Code Breaker is unable to correctly guess the Secret Code in 12 turns of guesses or less.\n\n| Please enter your name to start the game: "
+
 player_name = gets.chomp
-#Use the following code when testing the game play:
-#test_code = ["1", "1", "1", "1"]
-#codemaker = Codemaker.new(test_code)
-codemaker = Codemaker.new
+puts "\n| #{player_name}, once again, welcome to Mastermind! Would you like to play the Code Maker or the Code Breaker?"
+print "\n| Enter 1 to play Code Maker or 2 to play Code Breaker: "
+
+choice = gets.chomp
+
+if choice == "1"
+  print "\n| Code Maker #{player_name}, please choose a Secret Code (4 digits, each 1-6): "
+  code = gets.chomp.chars
+  puts "\n| The Secret Code set by you is: #{code.join("")}"
+  codemaker = Codemaker.new(code)
+  codebreaker = ComputerCodeBreaker.new
+elsif choice == "2"
+  #Use the following code when testing the game play:
+  #test_code = ["1", "1", "1", "1"]
+  #codemaker = Codemaker.new(test_code)
+  codemaker = Codemaker.new
+  codebreaker = Codebreaker.new(player_name)
+end
+
 board = Board.new
-game = Game.new(player_name, codemaker, board)
+game = Game.new(player_name, codemaker, board, codebreaker)
 game.play
